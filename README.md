@@ -2,7 +2,7 @@
 ### Plugin for Figma: [figma.com/community/plugin/1422956196270075203/timesaver-conditionally-select-rename-export-delete-duplicate](https://www.figma.com/community/plugin/1422956196270075203/timesaver-conditionally-select-rename-export-delete-duplicate)
 
 <p float="left">
-<img src="https://github.com/fireinureeyes/figma-timesaver/blob/main/logo.png?raw=true">
+<img src="https://github.com/fireinureeyes/figma-timesaver/blob/main/logo2.png?raw=true">
 </p>
 
 Define your custom conditions and quickly filter out any subset of elements across your file.
