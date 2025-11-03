@@ -1,7 +1,4 @@
-import { count } from 'console';
-import { get } from 'http';
 import * as JSZip from 'jszip';
-import { cursorTo } from 'readline';
 
 figma.showUI(__html__, { width: 1100, height: 370 });
 
@@ -12,31 +9,364 @@ type Variable = {
   variableValue: any;
 };
 
-figma.ui.onmessage = async (msg) => {
-  if (msg.type === 'initialize-count') {
-    figma.ui.postMessage({ type: 'loading', isLoading: true, count: 0, currentPageCount: 0 });
-    const nodesToProcess = Array.from(figma.currentPage.findAll());
-    const elements = [];
-    for (let i = 0; i < nodesToProcess.length; i++) { 
-      elements.push({
-        id: nodesToProcess[i].id,
-        name: nodesToProcess[i].name,
-        pageName: getPageName(nodesToProcess[i]),
-        selected: true
-      });
-      figma.ui.postMessage({ type: 'loading', isLoading: true, count: i, currentPageCount: nodesToProcess.length });
+let objectScopeSetting = 'current-page';
+let selectionChangeByPlugin = false;
 
-      // Pause every 100 frames for 40ms 
-      if (i > 0 && i % 2000 === 0) {
-        await new Promise(resolve => setTimeout(resolve, 1));
-      }
+figma.on('close', () => {
+  figma.clientStorage.setAsync('scope', objectScopeSetting);
+});
+
+figma.on('selectionchange', () => {
+  if (objectScopeSetting === 'current-selection') {
+    if (!selectionChangeByPlugin) {
+      initializePlugin(objectScopeSetting);
+    } else {
+      selectionChangeByPlugin = false;
     }
-    figma.ui.postMessage({ type: 'update-element-count', count: elements.length, currentPageCount: elements.length, elements });
-    figma.ui.postMessage({ type: 'loading', isLoading: false, count: elements.length });
+  }
+});
+
+figma.on('currentpagechange', () => {
+  if (objectScopeSetting === 'current-page') {
+    initializePlugin(objectScopeSetting);
+  }
+});
+
+figma.clientStorage.getAsync('scope',).then((storedScope) => {
+  figma.ui.postMessage({ type: 'scope-start', storedScope: storedScope });
+});
+
+figma.ui.onmessage = async (msg) => {
+
+  if (msg.type === 'update-scope') {
+    objectScopeSetting = msg.objectScope;
+    figma.clientStorage.setAsync('scope', objectScopeSetting);
+  }
+
+  if (msg.type === 'initialize-count') {
+
+    const { objectScope, elementType, filters, action, newName, replaceText, exportScale, exportFormat, exportSuffix } = msg;
+
+    initializePlugin(msg.objectScope);
   }
 
   if (msg.type === 'get-filename') {
     figma.ui.postMessage({ type: 'filename', fileName: figma.root.name });
+  }
+
+  if (msg.type === 'identify') {
+    if (figma.currentPage.selection.length === 0) {
+      figma.notify('No selection found', { timeout: 1000 });
+      return;
+    }
+    if (figma.currentPage.selection.length > 1) {
+      figma.notify('Select 1 element only', { timeout: 1000 });
+      return;
+    }
+    let result;
+    const selectedNode = figma.currentPage.selection[0];
+
+    switch (msg.key) {
+      case 'layer-name':
+        result = selectedNode.name;
+        break;
+
+      case 'page-name':
+        result = getPageName(selectedNode);
+        break;
+
+      case 'width':
+        result = 'width' in selectedNode ? selectedNode.width : 'N/A';
+        break;
+
+      case 'height':
+        result = 'height' in selectedNode ? selectedNode.height : 'N/A';
+        break;
+
+      case 'x':
+        result = 'x' in selectedNode ? selectedNode.x : 'N/A';
+        break;
+
+      case 'y':
+        result = 'y' in selectedNode ? selectedNode.y : 'N/A';
+        break;
+
+      case 'rotation':
+        result = 'rotation' in selectedNode ? selectedNode.rotation : 'N/A';
+        break;
+
+      case 'number-of-children':
+        result = 'children' in selectedNode ? selectedNode.children.length : 0;
+        break;
+
+      case 'nested-level':
+        result = getNodeNestedLevel(selectedNode);
+        break;
+
+      case 'number-of-points':
+        result = selectedNode.type === 'VECTOR'
+          ? selectedNode.vectorPaths.reduce((acc, path) => acc + path.data.split(' ').length / 3, 0)
+          : 0;
+        break;
+
+      case 'appearance-rounding':
+        result = 'cornerRadius' in selectedNode
+          ? (typeof selectedNode.cornerRadius === 'number' ? selectedNode.cornerRadius : 'Mixed')
+          : 0;
+        break;
+
+      case 'fill':
+        result = 'fills' in selectedNode && Array.isArray(selectedNode.fills) && selectedNode.fills.length > 0
+          ? selectedNode.fills
+          : false;
+        break;
+
+      case 'stroke':
+        result = 'strokeWeight' in selectedNode ? selectedNode.strokeWeight : 0;
+        break;
+
+      case 'stroke-color':
+        result = 'strokes' in selectedNode && Array.isArray(selectedNode.strokes) && selectedNode.strokes.length > 0
+          ? selectedNode.strokes
+          : false;
+        break;
+
+      case 'appearance-opacity':
+        result = 'opacity' in selectedNode ? selectedNode.opacity * 100 : 'N/A';
+        break;
+
+      case 'appearance-blendmode':
+        result = 'blendMode' in selectedNode ? selectedNode.blendMode : 'N/A';
+        break;
+
+      case 'fills-blendmode':
+        result = 'fills' in selectedNode && Array.isArray(selectedNode.fills) && selectedNode.fills.length > 0
+          ? selectedNode.fills[0].blendMode
+          : false;
+        break;
+
+      case 'fills-opacity':
+        result = 'fills' in selectedNode && Array.isArray(selectedNode.fills) && selectedNode.fills.length > 0
+          ? (selectedNode.fills[0].opacity !== undefined ? selectedNode.fills[0].opacity * 100 : 100)
+          : 'N/A';
+        break;
+
+      case 'fills-visibility':
+        result = 'fills' in selectedNode && Array.isArray(selectedNode.fills) && selectedNode.fills.length > 0
+          ? selectedNode.fills[0].visible !== false
+          : 'N/A';
+        break;
+
+      case 'strokes-opacity':
+        result = 'strokes' in selectedNode && selectedNode.strokes.length > 0
+          ? (selectedNode.strokes[0].opacity !== undefined ? selectedNode.strokes[0].opacity * 100 : 100)
+          : 'N/A';
+        break;
+
+      case 'strokes-blendmode':
+        result = 'strokes' in selectedNode && selectedNode.strokes.length > 0
+          ? selectedNode.strokes[0].blendMode ?? 'N/A'
+          : 'N/A';
+        break;
+
+      case 'strokes-visibility':
+        result = 'strokes' in selectedNode && selectedNode.strokes.length > 0
+          ? selectedNode.strokes[0].visible !== false
+          : 'N/A';
+        break;
+
+      case 'strokes-align':
+        result = 'strokeAlign' in selectedNode && Array.isArray(selectedNode.strokes) && selectedNode.strokes.length > 0
+          ? selectedNode.strokeAlign
+          : 'N/A';
+        break;
+
+      case 'font-name':
+        result = 'fontName' in selectedNode
+          ? (typeof selectedNode.fontName === 'symbol' ? 'Mixed' : selectedNode.fontName.family)
+          : 'N/A';
+        break;
+
+      case 'font-size':
+        result = 'fontSize' in selectedNode
+          ? (typeof selectedNode.fontSize === 'number' ? selectedNode.fontSize : 'N/A')
+          : 'N/A';
+        break;
+
+      case 'line-height':
+        result = 'lineHeight' in selectedNode
+          ? (typeof selectedNode.lineHeight === 'object'
+            ? (selectedNode.lineHeight.unit === 'AUTO' ? 'Auto' : selectedNode.lineHeight.value)
+            : (typeof selectedNode.lineHeight === 'number' ? selectedNode.lineHeight : 'N/A'))
+          : 'N/A';
+        break;
+
+      case 'letter-spacing':
+        result = 'letterSpacing' in selectedNode
+          ? (typeof selectedNode.letterSpacing === 'object'
+            ? (selectedNode.letterSpacing.unit === 'PERCENT' ? selectedNode.letterSpacing.value : 'N/A')
+            : (typeof selectedNode.letterSpacing === 'number' ? selectedNode.letterSpacing : 'N/A'))
+          : 'N/A';
+        break;
+
+      case 'font-weight':
+        result = 'fontWeight' in selectedNode ? selectedNode.fontWeight : 'N/A';
+        break;
+
+      case 'text-horizontal-align':
+        result = 'textAlignHorizontal' in selectedNode ? selectedNode.textAlignHorizontal : 'N/A';
+        break;
+
+      case 'text-vertical-align':
+        result = 'textAlignVertical' in selectedNode ? selectedNode.textAlignVertical : 'N/A';
+        break;
+
+      case 'text-decoration':
+        result = 'textDecoration' in selectedNode ? selectedNode.textDecoration : 'N/A';
+        break;
+
+      case 'paragraph-indent':
+        result = 'paragraphIndent' in selectedNode ? selectedNode.paragraphIndent : 'N/A';
+        break;
+
+      case 'paragraph-spacing':
+        result = 'paragraphSpacing' in selectedNode ? selectedNode.paragraphSpacing : 'N/A';
+        break;
+
+      case 'autolayout':
+        result = 'layoutMode' in selectedNode ? (selectedNode.layoutMode !== 'NONE') : 'N/A';
+        break;
+
+      case 'autolayout-position':
+        result = 'primaryAxisAlignItems' in selectedNode ? selectedNode.primaryAxisAlignItems : 'N/A';
+        break;
+
+      case 'autolayout-direction':
+        result = 'layoutMode' in selectedNode
+          ? (selectedNode.layoutMode !== 'NONE' ? selectedNode.layoutMode : 'N/A')
+          : 'N/A';
+        break;
+
+      case 'autolayout-item-spacing':
+        result = 'itemSpacing' in selectedNode ? selectedNode.itemSpacing : 'N/A';
+        break;
+
+      case 'autolayout-padding-top':
+        result = 'paddingTop' in selectedNode ? selectedNode.paddingTop : 'N/A';
+        break;
+
+      case 'autolayout-padding-bottom':
+        result = 'paddingBottom' in selectedNode ? selectedNode.paddingBottom : 'N/A';
+        break;
+
+      case 'autolayout-padding-left':
+        result = 'paddingLeft' in selectedNode ? selectedNode.paddingLeft : 'N/A';
+        break;
+
+      case 'autolayout-padding-right':
+        result = 'paddingRight' in selectedNode ? selectedNode.paddingRight : 'N/A';
+        break;
+
+      case 'interaction':
+        result = 'interactive' in selectedNode ? selectedNode.interactive : 'N/A';
+        break;
+
+      case 'flow-starting-point':
+        result = 'flowStartingPoint' in selectedNode ? selectedNode.flowStartingPoint : 'N/A';
+        break;
+
+      case 'visibility':
+        result = 'visible' in selectedNode ? selectedNode.visible : 'N/A';
+        break;
+
+      case 'is-locked':
+        result = 'locked' in selectedNode ? selectedNode.locked : 'N/A';
+        break;
+
+      case 'is-mask':
+        result = 'isMask' in selectedNode ? selectedNode.isMask : 'N/A';
+        break;
+
+      case 'export-setting':
+        result = 'exportSettings' in selectedNode
+          ? (selectedNode.exportSettings?.length > 0)
+          : 'N/A';
+        break;
+
+      case 'overriden-properties':
+        result = selectedNode.type === 'INSTANCE'
+          ? (selectedNode.overrides.length > 0)
+          : false;
+        break;
+
+      default:
+        result = 'Unknown property';
+    }
+    figma.ui.postMessage({ type: 'identify-result', key: msg.key, result: result });
+  }
+
+  //handle loading conditions from a selected element
+  if (msg.type === 'load-selection') {
+    if (figma.currentPage.selection.length === 0) {
+      figma.notify('No selection found', { timeout: 1000 });
+      return;
+    }
+    if (figma.currentPage.selection.length > 1) {
+      figma.notify('Select 1 element only', { timeout: 1000 });
+      return;
+    }
+    const selectedNode = figma.currentPage.selection[0];
+    figma.ui.postMessage({
+      type: 'selection',
+      selectionLayerName: selectedNode.name,
+      selectionPageName: getPageName(selectedNode),
+      selectionWidth: 'width' in selectedNode ? selectedNode.width : 'N/A',
+      selectionHeight: 'height' in selectedNode ? selectedNode.height : 'N/A',
+      selectionX: 'x' in selectedNode ? selectedNode.x : 'N/A',
+      selectionY: 'y' in selectedNode ? selectedNode.y : 'N/A',
+      selectionRotation: 'rotation' in selectedNode ? selectedNode.rotation : 'N/A',
+      selectionNumOfChildren: 'children' in selectedNode ? selectedNode.children.length : 0,
+      selectionNestedLevel: getNodeNestedLevel(selectedNode),
+      selectionNumOfPoints: selectedNode.type === 'VECTOR' ? selectedNode.vectorPaths.reduce((acc, path) => acc + path.data.split(' ').length / 3, 0) : 0,
+      selectionAppearanceRounding: 'cornerRadius' in selectedNode ? (typeof selectedNode.cornerRadius === 'number' ? selectedNode.cornerRadius : 'Mixed') : 0,
+      selectionFill: 'fills' in selectedNode && Array.isArray(selectedNode.fills) && selectedNode.fills.length > 0 ? selectedNode.fills : false,
+      selectionStrokeWeight: 'strokeWeight' in selectedNode ? selectedNode.strokeWeight : 0,
+      selectionStrokeColor: 'strokes' in selectedNode && Array.isArray(selectedNode.strokes) && selectedNode.strokes.length > 0 ? selectedNode.strokes : false,
+      selectionAppearanceOpacity: 'opacity' in selectedNode ? selectedNode.opacity * 100 : 'N/A',
+      selectionAppearanceBlendmode: 'blendMode' in selectedNode ? selectedNode.blendMode : 'N/A',
+      selectionFillsBlendmode: 'fills' in selectedNode && Array.isArray(selectedNode.fills) && selectedNode.fills.length > 0 ? selectedNode.fills[0].blendMode : false,
+      selectionFillsOpacity: 'fills' in selectedNode && Array.isArray(selectedNode.fills) && selectedNode.fills.length > 0 ? (selectedNode.fills[0].opacity !== undefined ? selectedNode.fills[0].opacity * 100 : 100) : 'N/A',
+      selectionFillsVisibility: 'fills' in selectedNode && Array.isArray(selectedNode.fills) && selectedNode.fills.length > 0 ? (selectedNode.fills[0].visible !== false ? true : false) : 'N/A',
+      selectionStrokesOpacity: 'strokes' in selectedNode && Array.isArray(selectedNode.strokes) && selectedNode.strokes.length > 0 ? (selectedNode.strokes[0].opacity !== undefined ? selectedNode.strokes[0].opacity * 100 : 100) : 'N/A',
+      selectionStrokesBlendmode: 'strokes' in selectedNode && Array.isArray(selectedNode.strokes) && selectedNode.strokes.length > 0 ? selectedNode.strokes[0].blendMode !== undefined ? selectedNode.strokes[0].blendMode : 'N/A' : 'N/A',
+      selectionStrokesVisibility: 'strokes' in selectedNode && Array.isArray(selectedNode.strokes) && selectedNode.strokes.length > 0 ? (selectedNode.strokes[0].visible !== false ? true : false) : 'N/A',
+      selectionStrokesAlign: 'strokeAlign' in selectedNode && Array.isArray(selectedNode.strokes) && selectedNode.strokes.length > 0 ? selectedNode.strokeAlign : 'N/A',
+      selectionFontName: 'fontName' in selectedNode ? (typeof selectedNode.fontName === 'symbol' ? 'Mixed' : (selectedNode.fontName as FontName).family) : 'N/A',
+      selectionFontSize: 'fontSize' in selectedNode ? (typeof selectedNode.fontSize === 'number' ? selectedNode.fontSize : 'N/A') : 'N/A',
+      selectionLineHeight: 'lineHeight' in selectedNode ? (typeof selectedNode.lineHeight === 'object' ? (selectedNode.lineHeight.unit === 'AUTO' ? 'Auto' : selectedNode.lineHeight.value) : (typeof selectedNode.lineHeight === 'number' ? selectedNode.lineHeight : 'N/A')) : 'N/A',
+      selectionLetterSpacing: 'letterSpacing' in selectedNode ? (typeof selectedNode.letterSpacing === 'object' ? (selectedNode.letterSpacing.unit === 'PERCENT' ? selectedNode.letterSpacing.value : 'N/A') : (typeof selectedNode.letterSpacing === 'number' ? selectedNode.letterSpacing : 'N/A')) : 'N/A',
+      selectionFontWeight: 'fontWeight' in selectedNode ? selectedNode.fontWeight : 'N/A',
+      selectionTextAlignHorizontal: 'textAlignHorizontal' in selectedNode ? selectedNode.textAlignHorizontal : 'N/A',
+      selectionTextAlignVertical: 'textAlignVertical' in selectedNode ? selectedNode.textAlignVertical : 'N/A',
+      selectionTextDecoration: 'textDecoration' in selectedNode ? selectedNode.textDecoration : 'N/A',
+      selectionParagraphIndent: 'paragraphIndent' in selectedNode ? selectedNode.paragraphIndent : 'N/A',
+      selectionParagraphSpacing: 'paragraphSpacing' in selectedNode ? selectedNode.paragraphSpacing : 'N/A',
+      selectionAutolayout: 'layoutMode' in selectedNode ? (selectedNode.layoutMode !== 'NONE' ? true : false) : 'N/A',
+      selectionAutolayoutPosition: 'primaryAxisAlignItems' in selectedNode ? selectedNode.primaryAxisAlignItems : 'N/A',
+      selectionAutolayoutDirection: 'layoutMode' in selectedNode ? (selectedNode.layoutMode !== 'NONE' ? selectedNode.layoutMode : 'N/A') : 'N/A',
+      selectionAutolayoutItemSpacing: 'itemSpacing' in selectedNode ? selectedNode.itemSpacing : 'N/A',
+      selectionAutolayoutPaddingTop: 'paddingTop' in selectedNode ? selectedNode.paddingTop : 'N/A',
+      selectionAutolayoutPaddingBottom: 'paddingBottom' in selectedNode ? selectedNode.paddingBottom : 'N/A',
+      selectionAutolayoutPaddingLeft: 'paddingLeft' in selectedNode ? selectedNode.paddingLeft : 'N/A',
+      selectionAutolayoutPaddingRight: 'paddingRight' in selectedNode ? selectedNode.paddingRight : 'N/A',
+      selectionInteraction: 'interactive' in selectedNode ? selectedNode.interactive : 'N/A',
+      selectionFlowStartingPoint: 'flowStartingPoint' in selectedNode ? selectedNode.flowStartingPoint : 'N/A',
+      selectionVisibility: 'visible' in selectedNode ? selectedNode.visible : 'N/A',
+      selectionIsLocked: 'locked' in selectedNode ? selectedNode.locked : 'N/A',
+      selectionIsMask: 'isMask' in selectedNode ? selectedNode.isMask : 'N/A',
+      selectionExportSettings: 'exportSettings' in selectedNode ? (selectedNode.exportSettings && selectedNode.exportSettings.length > 0 ? true : false) : 'N/A',
+      selectionOverridenProperties: selectedNode.type === 'INSTANCE' ? (selectedNode.overrides.length > 0 ? true : false) : false,
+    });
   }
 
   if (msg.type === 'filter-elements') {
@@ -123,24 +453,26 @@ figma.ui.onmessage = async (msg) => {
         const page = figma.root.children[i];
         if (page.type === 'PAGE') {
           pageCount = pageCount + 1;
-      }}
+        }
+      }
       for (let i = 0; i < figma.root.children.length; i++) {
         const page = figma.root.children[i];
         if (page.type === 'PAGE') {
           const pageNodes = page.findAll();
           if (page.id === figma.currentPage.id) {
-        currentPageCount = pageNodes.length;
+            currentPageCount = pageNodes.length;
           }
           nodesToProcess = nodesToProcess.concat(pageNodes);
         }
         await new Promise(resolve => setTimeout(resolve, 40));
-        figma.ui.postMessage({ type: 'loading', isLoading: true, count: i+1, currentPageCount: pageCount, nodesToProcess: nodesToProcess.length });
+        figma.ui.postMessage({ type: 'loading', isLoading: true, count: i + 1, currentPageCount: pageCount, nodesToProcess: nodesToProcess.length });
         await new Promise(resolve => setTimeout(resolve, 40));
       }
     } else if (objectScope === 'current-selection') {
       if (figma.currentPage.selection.length === 0) {
-        figma.notify('Error: No selection found!');
+        figma.notify('No selection found', { timeout: 500 });
         figma.ui.postMessage({ type: 'loading', isLoading: false });
+        figma.ui.postMessage({ type: 'update-element-count', count: 0, elements: [], currentPageCount: 0 });
         return;
       }
       nodesToProcess = figma.currentPage.selection.flatMap(node => getNodeAndAllChildren(node));
@@ -195,6 +527,13 @@ figma.ui.onmessage = async (msg) => {
                   const roundingValue = parseFloat(value);
                   conditionMet = compareValues(cornerRadiusValue, roundingValue, comparison);
                 }
+                else if
+                  ((typeof cornerRadiusValue === 'symbol') && (value === 'Mixed')) {
+                  conditionMet = true;
+                }
+              } else {
+                const roundingValue = parseFloat(value);
+                conditionMet = compareValues(0, roundingValue, comparison);
               }
               break;
             case 'fill':
@@ -210,6 +549,9 @@ figma.ui.onmessage = async (msg) => {
                   const strokeValue = parseFloat(value);
                   conditionMet = compareValues(strokeWeightValue, strokeValue, comparison);
                 }
+              } else {
+                const strokeValue = parseFloat(value);
+                conditionMet = compareValues(0, strokeValue, comparison);
               }
               break;
             case 'stroke-color':
@@ -416,6 +758,8 @@ figma.ui.onmessage = async (msg) => {
                 const childrenCount = node.children.length;
                 const numericValue = parseFloat(value);
                 conditionMet = compareValues(childrenCount, numericValue, comparison);
+              } else {
+                conditionMet = compareValues(0, parseFloat(value), comparison);
               }
               break;
             case 'corner-radius-top-left':
@@ -482,14 +826,14 @@ figma.ui.onmessage = async (msg) => {
               break;
             case 'strokes-visibility':
               if ('strokes' in node && Array.isArray(node.strokes)) {
-                conditionMet = node.strokes.some(stroke => stroke.visible === (value === 'true'));
+                conditionMet = node.strokes.some(stroke => {
+                  const isVisible = stroke.visible !== false;
+                  return comparison === 'is-visible' ? isVisible : !isVisible;
+                });
               }
               break;
             case 'strokes-type':
-              if ('strokes' in node && Array.isArray(node.strokes)) {
-                const hexValue = processHexInput(value);
-                conditionMet = compareFills(node.strokes, hexValue, comparison);
-              }
+              //
               break;
             case 'strokes-align':
               if ('strokes' in node && Array.isArray(node.strokes) && node.strokes.length > 0) {
@@ -595,6 +939,12 @@ figma.ui.onmessage = async (msg) => {
                 } else {
                   conditionMet = !hasOverrides;
                 }
+              } else {
+                if (comparison === 'yes') {
+                  conditionMet = false;
+                } else {
+                  conditionMet = true;
+                }
               }
               break;
             case 'is-locked':
@@ -690,11 +1040,6 @@ figma.ui.onmessage = async (msg) => {
               break;
           }
 
-          //if (index === nodesToProcess.length - 1) {
-          //  figma.ui.postMessage({ type: 'loading', isLoading: false });
-          //index = 0;
-          //}
-
           if (index === 0) return conditionMet;
           return logic === 'AND' ? acc && conditionMet : acc || conditionMet;
         }, true);
@@ -709,24 +1054,25 @@ figma.ui.onmessage = async (msg) => {
 
     const selectedElements = msg.selectedElements || [];
 
-    const filteredElements = elements.filter(function(node) {
+    const filteredElements = elements.filter(function (node) {
       return selectedElements.includes(node.id);
     });
 
     if (action === 'select') {
+      selectionChangeByPlugin = true;
       if (objectScope === 'all-pages') {
         const elementsOnCurrentPage: SceneNode[] = filteredElements.filter((node: SceneNode) => getPageId(node) === figma.currentPage.id);
         figma.currentPage.selection = elementsOnCurrentPage;
       } else {
-      figma.currentPage.selection = filteredElements;
-    }
+        figma.currentPage.selection = filteredElements;
+      }
     } else if (action === 'delete') {
       elements.forEach(node => {
         if (filteredElements.includes(node)) {
           node.remove();
         }
       });
-      figma.ui.postMessage({ type: 'update-results'}); // Refresh results list
+      figma.ui.postMessage({ type: 'update-results' }); // Refresh results list
     } else if (action === 'rename') {
       elements.forEach((node, index) => {
         if (filteredElements.includes(node)) {
@@ -746,7 +1092,7 @@ figma.ui.onmessage = async (msg) => {
           }
         }
       });
-      figma.ui.postMessage({ type: 'update-results'}); // Refresh results list
+      figma.ui.postMessage({ type: 'update-results' }); // Refresh results list
     } else if (action === 'duplicate') {
       const duplicates = elements.filter((node: SceneNode) => filteredElements.includes(node)).map(node => {
         const clone = node.clone();
@@ -845,10 +1191,6 @@ figma.ui.onmessage = async (msg) => {
 
   if (msg.type === 'resize-window') {
     figma.ui.resize(1100, msg.height);
-  }
-
-  if (msg.type === 'close-plugin') {
-    figma.closePlugin();
   }
 };
 
@@ -952,4 +1294,94 @@ function getNodeAndAllChildren(node: SceneNode): SceneNode[] {
     });
   }
   return nodes;
+}
+
+function initializePlugin(scope: string) {
+  figma.clientStorage.getAsync('scope',).then((storedScope) => {
+    if (storedScope) {
+      objectScopeSetting = storedScope;
+    } else {
+      objectScopeSetting = scope;
+    }
+
+    if (objectScopeSetting === 'current-selection') {
+      if (figma.currentPage.selection.length === 0) {
+        figma.notify('No selection found', { timeout: 500 });
+        figma.ui.postMessage({ type: 'loading', isLoading: false });
+        figma.ui.postMessage({ type: 'update-results' });
+        figma.ui.postMessage({ type: 'update-element-count', count: 0, elements: [], currentPageCount: 0 });
+        return;
+      }
+      const nodesToProcess = figma.currentPage.selection.flatMap(node => getNodeAndAllChildren(node));
+      const elements = [];
+      for (let i = 0; i < nodesToProcess.length; i++) {
+        elements.push({
+          id: nodesToProcess[i].id,
+          name: nodesToProcess[i].name,
+          pageName: getPageName(nodesToProcess[i]),
+          selected: true
+        });
+        figma.ui.postMessage({ type: 'loading', isLoading: true, count: i, currentPageCount: nodesToProcess.length });
+      }
+
+      figma.ui.postMessage({ type: 'update-element-count', count: elements.length, currentPageCount: elements.length, elements });
+      figma.ui.postMessage({ type: 'loading', isLoading: false, count: elements.length });
+    }
+
+    else if (objectScopeSetting === 'current-page') {
+      figma.ui.postMessage({ type: 'loading', isLoading: true, count: 0, currentPageCount: 0 });
+
+      const nodesToProcess = Array.from(figma.currentPage.findAll());
+      const elements = [];
+      for (let i = 0; i < nodesToProcess.length; i++) {
+        elements.push({
+          id: nodesToProcess[i].id,
+          name: nodesToProcess[i].name,
+          pageName: getPageName(nodesToProcess[i]),
+          selected: true
+        });
+        figma.ui.postMessage({ type: 'loading', isLoading: true, count: i, currentPageCount: nodesToProcess.length });
+      }
+      figma.ui.postMessage({ type: 'update-element-count', count: elements.length, currentPageCount: elements.length, elements });
+      figma.ui.postMessage({ type: 'loading', isLoading: false, count: elements.length });
+    }
+
+    else if (objectScopeSetting === 'all-pages') {
+      figma.ui.postMessage({ type: 'loading', isLoading: true, count: 0, currentPageCount: 0 });
+
+      figma.loadAllPagesAsync();
+      let nodesToProcess: any[] = [];
+      let pageCount = 0;
+      let currentPageCount
+      for (let i = 0; i < figma.root.children.length; i++) {
+        const page = figma.root.children[i];
+        if (page.type === 'PAGE') {
+          pageCount = pageCount + 1;
+        }
+      }
+      for (let i = 0; i < figma.root.children.length; i++) {
+        const page = figma.root.children[i];
+        if (page.type === 'PAGE') {
+          const pageNodes = page.findAll();
+          if (page.id === figma.currentPage.id) {
+            currentPageCount = pageNodes.length;
+          }
+          nodesToProcess = nodesToProcess.concat(pageNodes);
+        }
+      }
+      const elements = [];
+      for (let i = 0; i < nodesToProcess.length; i++) {
+        elements.push({
+          id: nodesToProcess[i].id,
+          name: nodesToProcess[i].name,
+          pageName: getPageName(nodesToProcess[i]),
+          selected: true
+        });
+        figma.ui.postMessage({ type: 'loading', isLoading: true, count: i, currentPageCount: nodesToProcess.length });
+      }
+      figma.ui.postMessage({ type: 'update-element-count', count: elements.length, currentPageCount: elements.length, elements });
+      figma.ui.postMessage({ type: 'loading', isLoading: false, count: elements.length });
+
+    }
+  });
 }
