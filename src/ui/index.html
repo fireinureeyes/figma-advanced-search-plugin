@@ -1,0 +1,124 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset="utf-8" />
+  <!--CSS-->
+</head>
+
+<body>
+  <div class="header">
+    <div>
+      Build conditions and find, rename, export, delete or duplicate anything from the canvas.
+    </div>
+    <div class="header-buttons">
+      <button id="loadSelection" class="button">⌖ Load all from selection</button>
+      <button id="refresh" class="button">Refresh</button>
+      <button id="reset" class="button">Reset filters</button>
+      <button id="csv" class="button">Export list as CSV</button>
+    </div>
+  </div>
+
+  <div class="main-container">
+    <div class="left-panel">
+      <div class="selector">
+        <p>
+          Find all
+          <select id="elementType">
+            <option value="ANY">objects</option>
+            <option value="UNION">unions</option>
+            <option value="SUBTRACT">subtracts</option>
+            <option value="INTERSECT">intersects</option>
+            <option value="EXCLUDE">excludes</option>
+            <option value="COMPONENT">components</option>
+            <option value="ELLIPSE">ellipses</option>
+            <option value="FRAME">frames</option>
+            <option value="GROUP">groups</option>
+            <option value="INSTANCE">instances</option>
+            <option value="LINE">lines</option>
+            <option value="POLYGON">polygons</option>
+            <option value="RECTANGLE">rectangles</option>
+            <option value="SECTION">sections</option>
+            <option value="STAR">stars</option>
+            <option value="TEXT">texts</option>
+            <option value="VECTOR">vectors</option>
+          </select>
+        </p>
+        <p>
+          in the
+          <select id="objectScope">
+            <option value="current-page">current page</option>
+            <option value="all-pages">whole document</option>
+            <option value="current-selection">current selection</option>
+          </select>
+        </p>
+      </div>
+
+      <div id="filterContainer"></div>
+
+      <button id="addFilter">+ Add filter condition</button>
+
+      <div id="loadingMessage" class="status status-loading"></div>
+      <div id="tipMessage" class="status status-tip"></div>
+
+      <p id="elementCount">0 elements found</p>
+
+      <div class="actions">
+        <label><input type="radio" name="action" value="select" checked> Select</label>
+        <label><input type="radio" name="action" value="delete"> Delete</label>
+        <label><input type="radio" name="action" value="duplicate"> Duplicate</label>
+        <label><input type="radio" name="action" value="rename"> Rename</label>
+        <label><input type="radio" name="action" value="export"> Export</label>
+      </div>
+
+      <div id="exportOptions" style="display: none;">
+        <label>
+          Scale
+          <select id="exportScale">
+            <option value="default" selected>default</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+          </select>
+        </label>
+        <label>
+          Format
+          <select id="exportFormat">
+            <option value="default" selected>default</option>
+            <option value="PNG">PNG</option>
+            <option value="JPG">JPG</option>
+          </select>
+        </label>
+        <label>
+          Suffix
+          <input type="text" id="exportSuffix" value="default" />
+        </label>
+      </div>
+
+      <input type="text" id="replaceText" placeholder="Text to replace" style="display: none;">
+      <input type="text" id="newName" placeholder="New name. Try {id}, {name}, {page}, {date} or {alphabet}"
+        style="display: none; width: 350px;">
+      <button id="execute">Execute</button>
+    </div>
+
+    <div id="resultsContainer" class="results">
+      <table id="resultsTable">
+        <thead>
+          <tr id="resultsTableHeader">
+            <th><input type="checkbox" id="selectAllCheckbox"></th>
+            <th>ID</th>
+            <th>Layer Name</th>
+            <th>Page</th>
+            <th id="newNameHeader" style="display: none;">New Name</th>
+          </tr>
+        </thead>
+        <tbody id="resultsList"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!--JS-->
+</body>
+
+</html>

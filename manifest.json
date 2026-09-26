@@ -1,5 +1,5 @@
 {
-  "name": "Timesaver: Conditionally Select, Delete, Duplicate, Rename, Export",
+  "name": "Advanced Search: Find, Rename, Export, Delete, Duplicate",
   "id": "1422956196270075203",
   "api": "1.0.0",
   "main": "dist/code.js",
@@ -9,10 +9,10 @@
   "editorType": [
     "figma"
   ],
-  "ui": "ui.html",
+  "ui": "dist/ui.html",
   "networkAccess": {
     "allowedDomains": [
-      "https://cdnjs.cloudflare.com"
+      "none"
     ]
   }
 }

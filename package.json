@@ -1,13 +1,16 @@
 {
-  "name": "batch_ifttt",
-  "version": "1.0.0",
-  "description": "Your Figma Plugin",
-  "main": "code.js",
+  "name": "Advanced Search",
+  "version": "2.0.0",
+  "description": "Conditionally select, rename, export, delete or duplicate anything from the canvas.",
+  "main": "dist/code.js",
   "scripts": {
-    "build": "webpack",
-    "lint": "eslint --ext .ts,.tsx --ignore-pattern node_modules .",
-    "lint:fix": "eslint --ext .ts,.tsx --ignore-pattern node_modules --fix .",
-    "watch": "npm run build -- --watch"
+    "build": "node build.mjs --production",
+    "build:dev": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node build.mjs --tests && node dist/tests.cjs",
+    "lint": "eslint --ext .ts,.tsx --ignore-pattern node_modules --ignore-pattern dist .",
+    "lint:fix": "eslint --ext .ts,.tsx --ignore-pattern node_modules --ignore-pattern dist --fix ."
   },
   "author": "",
   "license": "",
@@ -17,9 +20,13 @@
     "@types/node": "^22.10.3",
     "@typescript-eslint/eslint-plugin": "^6.12.0",
     "@typescript-eslint/parser": "^6.12.0",
+    "buffer": "^6.0.3",
+    "esbuild": "^0.24.0",
     "eslint": "^8.54.0",
+    "stream-browserify": "^3.0.0",
     "ts-loader": "^9.5.1",
     "typescript": "^5.7.2",
+    "util": "^0.12.5",
     "webpack": "^5.97.1",
     "webpack-cli": "^6.0.1"
   },
@@ -43,7 +50,45 @@
           "caughtErrorsIgnorePattern": "^_"
         }
       ]
-    }
+    },
+    "overrides": [
+      {
+        "files": [
+          "src/ui/**/*.ts"
+        ],
+        "rules": {
+          "no-restricted-globals": [
+            "error",
+            {
+              "name": "figma",
+              "message": "The UI iframe has no figma global - post a message instead."
+            }
+          ]
+        }
+      },
+      {
+        "files": [
+          "src/main/**/*.ts"
+        ],
+        "rules": {
+          "no-restricted-globals": [
+            "error",
+            {
+              "name": "document",
+              "message": "The plugin sandbox has no DOM - post a message to the UI instead."
+            },
+            {
+              "name": "window",
+              "message": "The plugin sandbox has no DOM - post a message to the UI instead."
+            },
+            {
+              "name": "parent",
+              "message": "The plugin sandbox has no DOM - use figma.ui.postMessage."
+            }
+          ]
+        }
+      }
+    ]
   },
   "dependencies": {
     "jszip": "^3.10.1"
